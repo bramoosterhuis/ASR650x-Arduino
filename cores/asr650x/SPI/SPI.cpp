@@ -26,51 +26,19 @@
 #define spi_TIMEOUT	500
 
 
-SPIClass::SPIClass(int8_t ss, int8_t spiNum)
-	:_freq(6000000),
-	_spi_num(spiNum),
-	_inTransaction(false)
+SPIClass::SPIClass(int8_t spiNum)
+	: _spi_num(spiNum)
 	{}
 
 
-void SPIClass::begin(int8_t ss, uint32_t freq, int8_t spiNum)
-{
-	if(ss!=-1)
-	{
-		_ss = ss;
-	}
-	
-	if(spiNum != -1)
-	{
-		if(spiNum == 1)
-		{
-			_spi_num = spiNum;
-		}
-		else
-		{
-			_spi_num = 0;
-		}
-	}
-	
-	_freq = freq;
-	
-	if(_freq > 6000000)
-	{
-		_freq = 6000000;
-	}
-
-	pinMode(_ss,OUTPUT);
-	
+void SPIClass::begin()
+{	
 	if(_spi_num == 0)
 	{
-		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_1_SPI_OVS_FACTOR / _freq - 1;
-		SPI_1_SCBCLK_DIV_REG = div << 8 ;
 		SPI_1_Start();
 	}
 	else
 	{
-		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_2_SPI_OVS_FACTOR / _freq - 1;
-		SPI_2_SCBCLK_DIV_REG = div << 8 ;
 		SPI_2_Start();
 	}
 }
@@ -88,42 +56,120 @@ void SPIClass::end()
 }
 
 void SPIClass::setFrequency(uint32_t freq)
-{
-	_freq = freq;
-	
-	if(_freq > 6000000)
-	{
-		_freq = 6000000;
-	}
-	
+{	
 	if(_spi_num == 0)
 	{
-		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_1_SPI_OVS_FACTOR / _freq - 1;
+		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_1_SPI_OVS_FACTOR / ((freq > 6000000) ? 6000000 : freq) - 1;
 		SPI_1_SCBCLK_DIV_REG = div << 8 ;
 	}
 	else
 	{
-		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_2_SPI_OVS_FACTOR / _freq - 1;
+		uint32_t div = (float)CYDEV_BCLK__HFCLK__HZ / SPI_2_SPI_OVS_FACTOR / ((freq > 6000000) ? 6000000 : freq) - 1;
 		SPI_2_SCBCLK_DIV_REG = div << 8 ;
 	}
 }
 
-
-void SPIClass::beginTransaction(void)
+void SPIClass::usingInterrupt(int interruptNumber)
 {
-    _inTransaction = true;
-    digitalWrite(_ss,LOW);
+	//TODO: to be implemented.
+
+	/*
+	From https://www.arduino.cc/en/Reference/SPIusingInterrupt
+
+	If your program will perform SPI transactions within an interrupt, call this function to register 
+	the interrupt number or name with the SPI library. This allows SPI.beginTransaction() to prevent 
+	usage conflicts. Note that the interrupt specified in the call to usingInterrupt() will be 
+	disabled on a call to beginTransaction() and re-enabled in endTransaction().
+	*/
+}
+
+void SPIClass::beginTransaction(SPISettings settings)
+{
+	if(_spi_num == 0)
+	{
+		while(SPI_1_SpiUartGetTxBufferSize() != 0);
+	} 
+	else 
+	{
+		while(SPI_2_SpiUartGetTxBufferSize() != 0);
+	}
+
+	setFrequency(settings._clock);
+	setBitOrder(settings._bitOrder);
+	setDataMode(settings._dataMode);
 }
 
 void SPIClass::endTransaction()
 {
-    if(_inTransaction){
-        _inTransaction = false;
-    }
-    digitalWrite(_ss,HIGH);
 }
 
+void SPIClass::setDataMode(uint8_t dataMode) {
 
+    /**
+     SPI_MODE0 0x00 - CPOL: 0  CPHA: 0
+     SPI_MODE1 0x01 - CPOL: 0  CPHA: 1
+     SPI_MODE2 0x10 - CPOL: 1  CPHA: 0
+     SPI_MODE3 0x11 - CPOL: 1  CPHA: 1
+     */
+
+    bool CPOL = (dataMode & 0x10); ///< CPOL (Clock Polarity)
+    bool CPHA = (dataMode & 0x01); ///< CPHA (Clock Phase)
+
+    if(CPOL)          // Ensure same behavior as
+        CPHA ^= 1;    // SAM, AVR and Intel Boards
+	
+	if(_spi_num == 0)
+	{
+		if(CPHA) {
+			SPI_1_SPI_CTRL_REG |= (SPI_1_SPI_CTRL_CPHA);
+		} else {
+			SPI_1_SPI_CTRL_REG &= ~(SPI_1_SPI_CTRL_CPHA);
+		}
+
+		if(CPOL) {
+			SPI_1_SPI_CTRL_REG |= (SPI_1_SPI_CTRL_CPOL);
+		} else {
+			SPI_1_SPI_CTRL_REG &= ~(SPI_1_SPI_CTRL_CPOL);
+		}
+	}
+	else
+	{
+		if(CPHA) {
+			SPI_2_SPI_CTRL_REG |= (SPI_2_SPI_CTRL_CPHA);
+		} else {
+			SPI_2_SPI_CTRL_REG &= ~(SPI_2_SPI_CTRL_CPHA);
+		}
+
+		if(CPOL) {
+			SPI_2_SPI_CTRL_REG |= (SPI_2_SPI_CTRL_CPOL);
+		} else {
+			SPI_2_SPI_CTRL_REG &= ~(SPI_2_SPI_CTRL_CPOL);
+		}
+	}
+}
+
+void SPIClass::setBitOrder(uint8_t bitOrder) {
+	if(_spi_num == 0)
+	{
+		if(bitOrder == MSBFIRST) {
+			SPI_1_TX_CTRL_REG |= (SPI_1_TX_CTRL_MSB_FIRST);
+			SPI_1_RX_CTRL_REG |= (SPI_1_RX_CTRL_MSB_FIRST);
+		} else {
+			SPI_1_TX_CTRL_REG &= ~(SPI_1_TX_CTRL_MSB_FIRST);
+			SPI_1_RX_CTRL_REG &= ~(SPI_1_RX_CTRL_MSB_FIRST);
+		}
+	}
+	else
+	{
+		if(bitOrder == MSBFIRST) {
+			SPI_2_TX_CTRL_REG |= (SPI_2_TX_CTRL_MSB_FIRST);
+			SPI_2_RX_CTRL_REG |= (SPI_2_RX_CTRL_MSB_FIRST);
+		} else {
+			SPI_2_TX_CTRL_REG &= ~(SPI_2_TX_CTRL_MSB_FIRST);
+			SPI_2_RX_CTRL_REG &= ~(SPI_2_RX_CTRL_MSB_FIRST);
+		}
+	}
+}
 
 uint8_t SPIClass::transfer(uint8_t data)
 {
@@ -230,6 +276,6 @@ void SPIClass::transferBytes(uint8_t * data, uint8_t * out, uint32_t size)
 	}
 }
 
-SPIClass SPI(-1,SPI_NUM_0);
-SPIClass SPI1(-1,SPI_NUM_1);
+SPIClass SPI(SPI_NUM_0);
+SPIClass SPI1(SPI_NUM_1);
 
