@@ -29,9 +29,26 @@
 
 //#include "asr_project.h"
 
+static reg32 ClockDividerRegisterBackup = 0;
+
+// Reset all values to their working defaults.
+void SetDefaultSPISettings(){
+	// Recover clock register
+	SPI_1_SCBCLK_DIV_REG = ClockDividerRegisterBackup;
+
+	// CPHA 0, CPOL 0
+	SPI_1_SPI_CTRL_REG &= ~(SPI_1_SPI_CTRL_CPHA);
+	SPI_1_SPI_CTRL_REG &= ~(SPI_1_SPI_CTRL_CPOL);
+
+	// Set MSB First
+    SPI_1_TX_CTRL_REG |= (SPI_1_TX_CTRL_MSB_FIRST);
+    SPI_1_RX_CTRL_REG |= (SPI_1_RX_CTRL_MSB_FIRST);
+}
+
 void SpiInit( )
 {
 	SPI_1_Start();
+	ClockDividerRegisterBackup = (SPI_1_SCBCLK_DIV_REG & 0xffffff00);
 }
 
 void SpiDeInit( Spi_t *obj )
@@ -53,8 +70,11 @@ uint16_t SpiInOut( Spi_t *obj, uint16_t outData )
 {
 	uint32 data;
 	uint32 timeout = 0;
-	
+
 	while(SPI_1_SpiUartGetTxBufferSize() != 0);
+	
+	SetDefaultSPISettings();
+	
 	SPI_1_SpiUartWriteTxData(outData);
 //	trace("Send Data 0x%x...\n", outData);
 	
